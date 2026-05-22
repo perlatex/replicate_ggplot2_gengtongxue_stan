@@ -1,0 +1,124 @@
+---
+title: "数学形式与 Stan 代码"
+author: "wmj"
+date: "`r Sys.Date()`"
+output:
+  pdf_document: 
+    latex_engine: xelatex
+    number_sections: yes
+    df_print: kable
+linkcolor: red
+urlcolor: red
+header-includes:
+  - \usepackage[fontset = fandol]{ctex}
+  - \usepackage{amsmath, amssymb}
+  - \usepackage{booktabs}
+  - \usepackage{tabularx}
+  - \usepackage{graphicx}
+  - \usepackage{float}
+  - \usepackage{geometry}
+  - \geometry{margin=1in}
+  - \usepackage{indentfirst}\setlength{\parindent}{2em}
+classoptions: "hyperref, 12pt, a4paper"
+---
+
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo         = TRUE,
+  eval         = FALSE,
+  message      = FALSE,
+  warning      = FALSE,
+  out.width    = "100%",
+  fig.asp      = 0.618,
+  fig.width    = 5,
+  fig.show     = "hold",
+  fig.pos      = "H",
+  fig.align    = "center",
+  fig.showtext = TRUE,
+  dev          = "ragg_png",
+  dpi          = 600
+)
+
+options(digits = 3)
+```
+
+
+
+
+# 数学形式
+
+这条四参数剂量-反应模型 / 竞争性结合曲线，其数学形式是：
+
+$$
+y_i \sim \text{Normal}(\mu_i, \sigma)
+$$
+
+$$
+\mu_i =\text{bottom} + \frac{\text{top}-\text{bottom}}{1 + (x_i / K_d)^{\text{hill}}}
+$$
+
+
+
+# Stan 代码
+
+```stan
+functions {
+  real four_pl(real x, real bottom, real top, real Kd, real hill) {
+    return bottom + (top - bottom) / (1 + pow(x / Kd, hill));
+  }
+}
+
+data {
+  int<lower=1> N;
+  vector<lower=0>[N] x;   // Valine 浓度，单位 μM
+  vector[N] y;            // cpm
+  
+  int<lower=1> N_new;
+  vector<lower=0>[N_new] x_new;
+}
+
+parameters {
+  real<lower=0> top;      // 上平台
+  real<lower=0> bottom;   // 下平台
+  real<lower=0> Kd;       // 半最大效应浓度
+  real<lower=0> hill;     // 曲线陡峭程度
+  real<lower=0> sigma;    // 观测误差
+}
+
+transformed parameters {
+  vector[N] mu;
+
+  for (i in 1:N) {
+    mu[i] = four_pl(x[i], bottom, top, Kd, hill);
+  }
+}
+
+model {
+  top    ~ normal(20000, 5000);
+  bottom ~ normal(0, 1000);
+  Kd     ~ lognormal(log(2), 0.7);
+  hill   ~ lognormal(0, 0.5);
+  sigma  ~ exponential(1.0 / 2000);
+
+  y ~ normal(mu, sigma);
+}
+
+generated quantities {
+  vector[N] y_rep;
+  vector[N] log_lik;
+  vector[N_new] mu_new;
+  
+  for (i in 1:N) {
+    y_rep[i] = normal_rng(mu[i], sigma);
+    log_lik[i] = normal_lpdf(y[i] | mu[i], sigma);
+  }
+  
+  for (i in 1:N_new) {
+    mu_new[i] = four_pl(x_new[i], bottom, top, Kd, hill);
+  }
+}
+
+```
+
